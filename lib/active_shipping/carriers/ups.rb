@@ -18,6 +18,7 @@ module ActiveShipping
       :ship_accept => 'ups.app/xml/ShipAccept',
       :delivery_dates =>  'ups.app/xml/TimeInTransit',
       :void =>  'ups.app/xml/Void'
+      :address_validation => 'ups.app/xml/XAV'
     }
 
     PICKUP_CODES = HashWithIndifferentAccess.new(
@@ -209,6 +210,14 @@ module ActiveShipping
     def maximum_address_field_length
       # http://www.ups.com/worldshiphelp/WS12/ENU/AppHelp/CONNECT/Shipment_Data_Field_Descriptions.htm
       35
+    end
+
+    def validate_address(location, options = {})
+      options = @options.merge(options)
+      access_request = build_access_request
+      address_validation_request = build_address_validation_request(upsified_location(location), options)
+      response = commit(:address_validation, save_request(access_request + address_validation_request), (options[:test] || false))
+      parse_address_validation_response(response, options)
     end
 
     protected
@@ -687,6 +696,31 @@ module ActiveShipping
       end
     end
 
+    def build_address_validation_request(location, options={})
+      xml_builder = Nokogiri::XML::Builder.new do |xml|
+        xml.AddressValidationRequest do
+          xml.Request do
+            xml.TransactionReference do
+              xml.CustomerContext
+              xml.XpciVersion('1.0001')
+            end
+            xml.RequestAction('XAV')
+            xml.RequestOption('1')
+          end
+          xml.MaximumListSize(options[:maximum_list_size] || '3')
+          xml.AddressKeyFormat do
+            xml.AddressLine(location.address1)
+            xml.AddressLine(location.address2)
+            xml.PoliticalDivision2(location.city)
+            xml.PoliticalDivision1(location.state)
+            xml.PostcodePrimaryLow(location.zip)
+            xml.CountryCode(location.country_code)
+          end
+        end
+      end
+      xml_builder.to_xml
+    end
+
     def build_document(xml, expected_root_tag)
       document = Nokogiri.XML(xml)
       if document.root.nil? || document.root.name != expected_root_tag
@@ -861,6 +895,28 @@ module ActiveShipping
       else
         raise ResponseError.new("Void shipment failed with message: #{message}")
       end
+    end
+
+    def parse_address_validation_response(response, options)
+      xml = build_document(response, 'AddressValidationResponse')
+      success = response_success?(xml)
+      message = response_message(xml)
+      candidates = []
+      valid = false
+
+      if success
+        candidates = xml.css('AddressKeyFormat').map do |candidate|
+          Location.new(
+            country: candidate.at('CountryCode').try(:text),
+            zip: candidate.at('PostcodePrimaryLow').try(:text),
+            state: candidate.at('PoliticalDivision1').try(:text),
+            city: candidate.at('PoliticalDivision2').try(:text),
+          )
+        end
+      #  byebug
+        valid = xml.at('ValidAddressIndicator').present?
+      end
+      ActiveShipping::AddressValidationResponse.new(success, message, Hash.from_xml(response).values.first, valid: valid, candidates: candidates, xml: response, last_request: last_request)
     end
 
     def location_from_address_node(address)
