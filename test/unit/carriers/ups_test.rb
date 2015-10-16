@@ -128,6 +128,12 @@ class UPSTest < Minitest::Test
                   "DELIVERED"], response.shipment_events.map(&:name)
   end
 
+  def test_find_tracking_info_should_have_correct_type_codes_for_shipment_events
+    @carrier.expects(:commit).returns(@tracking_response)
+    response = @carrier.find_tracking_info('1Z5FX0076803466397')
+    assert_equal ["M", "I", "I", "I", "I", "I", "I", "D"], response.shipment_events.map(&:type_code)
+  end
+
   def test_add_origin_and_destination_data_to_shipment_events_where_appropriate
     @carrier.expects(:commit).returns(@tracking_response)
     response = @carrier.find_tracking_info('1Z5FX0076803466397')
@@ -332,6 +338,25 @@ class UPSTest < Minitest::Test
     refute_empty prepay
   end
 
+  def test_label_request_bill_third_party
+    expected_account_number = "A01B24"
+    expected_postal_code_number = "97013"
+    expected_country_code = "US"
+    response = Nokogiri::XML @carrier.send(:build_shipment_request,
+                                           location_fixtures[:beverly_hills],
+                                           location_fixtures[:annapolis],
+                                           package_fixtures.values_at(:chocolate_stuff),
+                                           :test => true,
+                                           :bill_third_party => true,
+                                           :billing_account => expected_account_number,
+                                           :billing_zip => expected_postal_code_number,
+                                           :billing_country => expected_country_code)
+
+    assert_equal expected_account_number, response.search('ShipmentConfirmRequest/Shipment/PaymentInformation/BillThirdParty/BillThirdPartyShipper/AccountNumber').text
+    assert_equal expected_postal_code_number, response.search('/ShipmentConfirmRequest/Shipment/PaymentInformation/BillThirdParty/BillThirdPartyShipper/ThirdParty/Address/PostalCode').text
+    assert_equal expected_country_code, response.search('/ShipmentConfirmRequest/Shipment/PaymentInformation/BillThirdParty/BillThirdPartyShipper/ThirdParty/Address/CountryCode').text
+  end
+
   def test_label_request_negotiated_rates_presence
     response = Nokogiri::XML @carrier.send(:build_shipment_request,
                                            location_fixtures[:beverly_hills],
@@ -505,5 +530,48 @@ class UPSTest < Minitest::Test
       }
     )
     assert_equal ["UPS Ground"], response.rates.map(&:service_name)
+  end
+
+  def test_void_shipment
+    mock_response = xml_fixture("ups/void_shipment_response")
+    @carrier.expects(:commit).returns(mock_response)
+    response = @carrier.void_shipment('1Z12345E0390817264')
+    assert response
+  end
+
+  def test_maximum_address_field_length
+    assert_equal 35, @carrier.maximum_address_field_length
+  end
+
+  def test_package_surepost_less_than_one_lb_service
+    xml_builder = Nokogiri::XML::Builder.new do |xml|
+      @carrier.send(:build_package_node,
+                    xml,
+                    package_fixtures[:small_half_pound],
+                    {
+                      :service => "92",
+                      :imperial => true
+                    }
+      )
+    end
+    request = Nokogiri::XML(xml_builder.to_xml)
+    assert_equal 'OZS', request.search('/Package/PackageWeight/UnitOfMeasurement/Code').text
+    assert_equal '8.0', request.search('/Package/PackageWeight/Weight').text
+  end
+
+  def test_package_surepost_less_than_one_lb_service_code
+    xml_builder = Nokogiri::XML::Builder.new do |xml|
+      @carrier.send(:build_package_node,
+                    xml,
+                    package_fixtures[:small_half_pound],
+                    {
+                      :service_code => "92",
+                      :imperial => true
+                    }
+      )
+    end
+    request = Nokogiri::XML(xml_builder.to_xml)
+    assert_equal 'OZS', request.search('/Package/PackageWeight/UnitOfMeasurement/Code').text
+    assert_equal '8.0', request.search('/Package/PackageWeight/Weight').text
   end
 end

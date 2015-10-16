@@ -16,11 +16,20 @@ module ActiveShipping
   end
 
   class ResponseContentError < ActiveShipping::Error
-    def initialize(exception, content_body)
-      super("#{exception.message} \n\n#{content_body}")
+    def initialize(exception, content_body = nil)
+      super([exception.message, content_body].compact.join(" \n\n"))
     end
   end
 
   class ShipmentNotFound < ActiveShipping::Error
+  end
+
+  class USPSValidationError < StandardError
+  end
+
+  class USPSMissingRequiredTagError < StandardError
+    def initialize(tag, prop)
+      super("Missing required tag #{tag} set by property #{prop}")
+    end
   end
 end

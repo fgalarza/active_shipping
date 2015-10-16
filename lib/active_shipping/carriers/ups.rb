@@ -16,7 +16,8 @@ module ActiveShipping
       :track => 'ups.app/xml/Track',
       :ship_confirm => 'ups.app/xml/ShipConfirm',
       :ship_accept => 'ups.app/xml/ShipAccept',
-      :delivery_dates =>  'ups.app/xml/TimeInTransit'
+      :delivery_dates =>  'ups.app/xml/TimeInTransit',
+      :void =>  'ups.app/xml/Void'
     }
 
     PICKUP_CODES = HashWithIndifferentAccess.new(
@@ -64,8 +65,11 @@ module ActiveShipping
       "83" => "UPS Today Dedicated Courier",
       "84" => "UPS Today Intercity",
       "85" => "UPS Today Express",
-      "86" => "UPS Today Express Saver"
-
+      "86" => "UPS Today Express Saver",
+      "92" => "UPS SurePost (USPS) < 1lb",
+      "93" => "UPS SurePost (USPS) > 1lb",
+      "94" => "UPS SurePost (USPS) BPM",
+      "95" => "UPS SurePost (USPS) Media",
     }
 
     CANADA_ORIGIN_SERVICES = {
@@ -144,7 +148,7 @@ module ActiveShipping
     # @return [ActiveShipping::TrackingResponse] The response from the carrier. This
     #   response should a list of shipment tracking events if successful.
     def find_tracking_info(tracking_number, options = {})
-      options = @options.update(options)
+      options = @options.merge(options)
       access_request = build_access_request
       tracking_request = build_tracking_request(tracking_number, options)
       response = commit(:track, save_request(access_request + tracking_request), options[:test])
@@ -192,6 +196,19 @@ module ActiveShipping
       dates_request = build_delivery_dates_request(origin, destination, packages, pickup_date, options)
       response = commit(:delivery_dates, save_request(access_request + dates_request), (options[:test] || false))
       parse_delivery_dates_response(origin, destination, packages, response, options)
+    end
+
+    def void_shipment(tracking, options={})
+      options = @options.merge(options)
+      access_request = build_access_request
+      void_request = build_void_request(tracking)
+      response = commit(:void, save_request(access_request + void_request), (options[:test] || false))
+      parse_void_response(response, options)
+    end
+
+    def maximum_address_field_length
+      # http://www.ups.com/worldshiphelp/WS12/ENU/AppHelp/CONNECT/Shipment_Data_Field_Descriptions.htm
+      35
     end
 
     protected
@@ -361,6 +378,20 @@ module ActiveShipping
                   end
                 end
               end
+            elsif options[:bill_third_party]
+              xml.PaymentInformation do
+                xml.BillThirdParty do
+                  xml.BillThirdPartyShipper do
+                    xml.AccountNumber(options[:billing_account])
+                    xml.ThirdParty do
+                      xml.Address do
+                        xml.PostalCode(options[:billing_zip])
+                        xml.CountryCode(options[:billing_country])
+                      end
+                    end
+                  end
+                end
+              end
             else
               xml.ItemizedPaymentInformation do
                 xml.ShipmentCharge do
@@ -468,6 +499,18 @@ module ActiveShipping
         end
       end
 
+      xml_builder.to_xml
+    end
+
+    def build_void_request(tracking)
+      xml_builder = Nokogiri::XML::Builder.new do |xml|
+        xml.VoidShipmentRequest do
+          xml.Request do
+            xml.RequestAction('Void')
+          end
+          xml.ShipmentIdentificationNumber(tracking)
+        end
+      end
       xml_builder.to_xml
     end
 
@@ -607,11 +650,19 @@ module ActiveShipping
         end
 
         xml.PackageWeight do
+          if (options[:service] || options[:service_code]) == DEFAULT_SERVICE_NAME_TO_CODE["UPS SurePost (USPS) < 1lb"]
+            # SurePost < 1lb uses OZS, not LBS
+            code = options[:imperial] ? 'OZS' : 'KGS'
+            weight = options[:imperial] ? package.oz : package.kgs
+          else
+            code = options[:imperial] ? 'LBS' : 'KGS'
+            weight = options[:imperial] ? package.lbs : package.kgs
+          end
           xml.UnitOfMeasurement do
-            xml.Code(options[:imperial] ? 'LBS' : 'KGS')
+            xml.Code(code)
           end
 
-          value = ((options[:imperial] ? package.lbs : package.kgs).to_f * 1000).round / 1000.0 # 3 decimals
+          value = ((weight).to_f * 1000).round / 1000.0 # 3 decimals
           xml.Weight([value, 0.1].max)
         end
 
@@ -721,9 +772,10 @@ module ActiveShipping
         unless activities.empty?
           shipment_events = activities.map do |activity|
             description = activity.at('Status/StatusType/Description').text
+            type_code = activity.at('Status/StatusType/Code').text
             zoneless_time = parse_ups_datetime(:time => activity.at('Time'), :date => activity.at('Date'))
             location = location_from_address_node(activity.at('ActivityLocation/Address'))
-            ShipmentEvent.new(description, zoneless_time, location)
+            ShipmentEvent.new(description, zoneless_time, location, nil, type_code)
           end
 
           shipment_events = shipment_events.sort_by(&:time)
@@ -733,7 +785,7 @@ module ActiveShipping
           # This adds an origin event to the shipment activity in such cases.
           if origin && !(shipment_events.count == 1 && status == :delivered)
             first_event = shipment_events[0]
-            origin_event = ShipmentEvent.new(first_event.name, first_event.time, origin)
+            origin_event = ShipmentEvent.new(first_event.name, first_event.time, origin, first_event.message, first_event.type_code)
 
             if within_same_area?(origin, first_event.location)
               shipment_events[0] = origin_event
@@ -752,7 +804,7 @@ module ActiveShipping
             unless destination
               destination = shipment_events[-1].location
             end
-            shipment_events[-1] = ShipmentEvent.new(shipment_events.last.name, shipment_events.last.time, destination)
+            shipment_events[-1] = ShipmentEvent.new(shipment_events.last.name, shipment_events.last.time, destination, shipment_events.last.message, shipment_events.last.type_code)
           end
         end
 
@@ -800,10 +852,23 @@ module ActiveShipping
       response = DeliveryDateEstimatesResponse.new(success, message, Hash.from_xml(response).values.first, :delivery_estimates => delivery_estimates, :xml => response, :request => last_request)
     end
 
+    def parse_void_response(response, options={})
+      xml = build_document(response, 'VoidShipmentResponse')
+      success = response_success?(xml)
+      message = response_message(xml)
+      if success
+        true
+      else
+        raise ResponseError.new("Void shipment failed with message: #{message}")
+      end
+    end
+
     def location_from_address_node(address)
       return nil unless address
+      country = address.at('CountryCode').try(:text)
+      country = 'US' if country == 'ZZ' # Sometimes returned by SUREPOST in the US
       Location.new(
-        :country     => address.at('CountryCode').try(:text),
+        :country     => country,
         :postal_code => address.at('PostalCode').try(:text),
         :province    => address.at('StateProvinceCode').try(:text),
         :city        => address.at('City').try(:text),

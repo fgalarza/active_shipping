@@ -16,6 +16,7 @@ Active Shipping is currently being used and improved in a production environment
 
 * [UPS](http://www.ups.com)
 * [USPS](http://www.usps.com)
+* [USPS Returns](http://returns.usps.com)
 * [FedEx](http://www.fedex.com)
 * [Canada Post](http://www.canadapost.ca)
 * [New Zealand Post](http://www.nzpost.co.nz)
@@ -98,7 +99,7 @@ Active Shipping is currently being used and improved in a production environment
 
 ## Running the tests
 
-After installing dependencies with `bundle install`, you can run the unit tests with `rake test:units` and the remote tests with `rake test:remote`. The unit tests mock out requests and responses so that everything runs locally, while the remote tests actually hit the carrier servers. For the remote tests, you'll need valid test credentials for any carriers' tests you want to run. The credentials should go in ~/.active_shipping/credentials.yml, and the format of that file can be seen in the included [credentials.yml](https://github.com/Shopify/active_shipping/blob/master/test/credentials.yml). For some carriers, we have public credentials you can use for testing: see `.travis.yml`.
+After installing dependencies with `bundle install`, you can run the unit tests with `rake test:unit` and the remote tests with `rake test:remote`. The unit tests mock out requests and responses so that everything runs locally, while the remote tests actually hit the carrier servers. For the remote tests, you'll need valid test credentials for any carriers' tests you want to run. The credentials should go in ~/.active_shipping/credentials.yml, and the format of that file can be seen in the included [credentials.yml](https://github.com/Shopify/active_shipping/blob/master/test/credentials.yml). For some carriers, we have public credentials you can use for testing: see `.travis.yml`.
 
 ## Development
 
@@ -115,6 +116,10 @@ To log requests and responses, just set the `logger` on your carrier class to so
     ActiveShipping::USPS.logger = Logger.new($stdout)
 
 (This logging functionality is provided by the [`PostsData` module](https://github.com/Shopify/active_utils/blob/master/lib/active_utils/posts_data.rb) in the `active_utils` dependency.)
+
+To debug API requests and your code you can run `rake console` to start a Pry session with `ActiveShipping` included
+and instances of the various carriers set up with your test credentials.
+Look at the file `test/console.rb` to see the other goodies it provides.
 
 After you've pushed your well-tested changes to your github fork, make a pull request and we'll take it from there! For more information, see CONTRIBUTING.md.
 

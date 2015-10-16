@@ -218,6 +218,35 @@ class RemoteUPSTest < Minitest::Test
     assert_instance_of ActiveShipping::LabelResponse, response
   end
 
+  def test_obtain_shipping_label_with_bill_third_party
+    begin
+      bill_third_party_credentials = credentials(:ups_third_party_billing)
+    rescue NoCredentialsFound => e
+      skip(e.message)
+    end
+
+    response = @carrier.create_shipment(
+      location_fixtures[:beverly_hills],
+      location_fixtures[:new_york_with_name],
+      package_fixtures.values_at(:books),
+      {
+        :test => true,
+        :bill_third_party => true,
+        :billing_account => bill_third_party_credentials[:account],
+        :billing_zip => bill_third_party_credentials[:zip],
+        :billing_country => bill_third_party_credentials[:country_code]
+      }
+    )
+
+    assert response.success?
+
+    # All behavior specific to how a LabelResponse behaves in the
+    # context of UPS label data is a matter for unit tests.  If
+    # the data changes substantially, the create_shipment
+    # ought to raise an exception and this test will fail.
+    assert_instance_of ActiveShipping::LabelResponse, response
+  end
+
   def test_obtain_international_shipping_label
     response = @carrier.create_shipment(
       location_fixtures[:new_york_with_name],
@@ -309,6 +338,25 @@ class RemoteUPSTest < Minitest::Test
     assert response.success?
     refute_empty response.delivery_estimates
     ww_express_estimate = response.delivery_estimates.select {|de| de.service_name == "UPS Worldwide Express"}.first
-    assert_equal Date.parse(1.business_day.from_now.to_s), ww_express_estimate.date
+    assert_equal Date.parse(1.day.from_now.to_s), ww_express_estimate.date
+  end
+
+  def test_void_shipment
+    # this is a test tracking number from the ups docs that always returns sucess
+    response = @carrier.void_shipment('1Z12345E0390817264')
+    assert response
+  end
+
+  def test_void_beyond_time_limit
+    e = assert_raises(ResponseError) do
+      # this is a test tracking number from the ups docs that always returns time limit expired
+      @carrier.void_shipment('1Z12345E8793628675')
+    end
+    assert_equal(e.message, "Void shipment failed with message: Failure: Time for voiding has expired.")
+  end
+
+
+  def test_maximum_address_field_length
+    assert_equal 35, @carrier.maximum_address_field_length
   end
 end

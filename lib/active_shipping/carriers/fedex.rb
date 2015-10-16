@@ -171,10 +171,13 @@ module ActiveShipping
       request = build_shipment_request(origin, destination, packages, options)
       logger.debug(request) if logger
 
-      logger.debug(confirm_response) if logger
-
       response = commit(save_request(request), (options[:test] || false))
       parse_ship_response(response)
+    end
+
+    def maximum_address_field_length
+      # See Fedex Developper Guide
+      35
     end
 
     protected
@@ -472,7 +475,7 @@ module ActiveShipping
           is_saturday_delivery = rated_shipment.at('AppliedOptions').try(:text) == 'SATURDAY_DELIVERY'
           service_type = is_saturday_delivery ? "#{service_code}_SATURDAY_DELIVERY" : service_code
 
-          transit_time = rated_shipment.at('TransitTime').text if service_code == "FEDEX_GROUND"
+          transit_time = rated_shipment.at('TransitTime').text if ["FEDEX_GROUND", "GROUND_HOME_DELIVERY"].include?(service_code)
           max_transit_time = rated_shipment.at('MaximumTransitTime').try(:text) if service_code == "FEDEX_GROUND"
 
           delivery_timestamp = rated_shipment.at('DeliveryTimestamp').try(:text)
@@ -570,7 +573,7 @@ module ActiveShipping
           when '9040'
             raise ActiveShipping::ShipmentNotFound, first_notification.at('Message').text
           else
-            raise ActiveShipping::ResponseContentError, first_notification.at('Message').text
+            raise ActiveShipping::ResponseContentError, StandardError.new(first_notification.at('Message').text)
           end
         end
 
@@ -580,7 +583,11 @@ module ActiveShipping
           raise ActiveShipping::Error, "Tracking response does not contain status information"
         end
 
-        status_code = status_detail.at('Code').text
+        status_code = status_detail.at('Code').try(:text)
+        if status_code.nil?
+          raise ActiveShipping::Error, "Tracking response does not contain status code"
+        end
+
         status_description = (status_detail.at('AncillaryDetails/ReasonDescription') || status_detail.at('Description')).text
         status = TRACKING_STATUS_CODES[status_code]
 

@@ -235,6 +235,25 @@ class FedExTest < Minitest::Test
     end
   end
 
+  def test_delivery_date_from_ground_home_transit_time
+    mock_response = xml_fixture('fedex/raterequest_response_with_ground_home_delivery')
+
+    @carrier.expects(:commit).returns(mock_response)
+
+    today = DateTime.civil(2015, 06, 03, 0, 0, 0, "-4")
+
+    Timecop.freeze(today) do
+      rate_estimates = @carrier.find_rates( location_fixtures[:ottawa],
+                                            location_fixtures[:beverly_hills],
+                                            package_fixtures.values_at(:book, :wii), :test => true)
+
+      # the above fixture will specify a transit time of 3 days, with 2 weekend days accounted for
+      delivery_date = Date.today + 5
+      assert_equal delivery_date, rate_estimates.rates.first.delivery_date
+    end
+  end
+
+
   def test_failure_to_parse_invalid_xml_results_in_a_useful_error
     mock_response = xml_fixture('fedex/invalid_fedex_reply')
 
@@ -426,6 +445,42 @@ class FedExTest < Minitest::Test
     end
   end
 
+  def test_tracking_info_with_uncovered_error
+    mock_response = xml_fixture('fedex/tracking_response_invalid_tracking_number')
+    @carrier.expects(:commit).returns(mock_response)
+
+    error = assert_raises(ActiveShipping::ResponseContentError) do
+      @carrier.find_tracking_info('123456789013')
+    end
+
+    msg = 'Invalid tracking numbers. Please check the following numbers and resubmit.'
+    assert_equal msg, error.message
+  end
+
+  def test_tracking_info_with_empty_status_detail
+    mock_response = xml_fixture('fedex/tracking_response_empty_status_detail')
+    @carrier.expects(:commit).returns(mock_response)
+
+    error = assert_raises(ActiveShipping::Error) do
+      @carrier.find_tracking_info('123456789012')
+    end
+
+    msg = 'Tracking response does not contain status information'
+    assert_equal msg, error.message
+  end
+
+  def test_tracking_info_with_invalid_status_code
+    mock_response = xml_fixture('fedex/tracking_response_invalid_status_code')
+    @carrier.expects(:commit).returns(mock_response)
+
+    error = assert_raises(ActiveShipping::Error) do
+      @carrier.find_tracking_info('123456789012')
+    end
+
+    msg = 'Tracking response does not contain status code'
+    assert_equal msg, error.message
+  end
+
   def test_create_shipment
     confirm_response = xml_fixture('fedex/create_shipment_response')
     @carrier.stubs(:commit).returns(confirm_response)
@@ -465,5 +520,9 @@ class FedExTest < Minitest::Test
                                          packages,
                                          :test => true))
     assert_equal result.search('RequestedPackageLineItems/CustomerReferences/Value').text, "FOO-123"
+  end
+
+  def test_maximum_address_field_length
+    assert_equal 35, @carrier.maximum_address_field_length
   end
 end

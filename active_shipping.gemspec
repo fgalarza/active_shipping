@@ -16,7 +16,7 @@ Gem::Specification.new do |s|
 
   s.add_dependency('quantified',    '~> 1.0.1')
   s.add_dependency('activesupport', '>= 3.2', '< 5.0.0')
-  s.add_dependency('active_utils',  '~> 3.0.0')
+  s.add_dependency('active_utils',  '~> 3.2.0')
   s.add_dependency('nokogiri',      '>= 1.6')
 
   s.add_development_dependency('minitest')
@@ -24,6 +24,7 @@ Gem::Specification.new do |s|
   s.add_development_dependency('mocha', '~> 1')
   s.add_development_dependency('timecop')
   s.add_development_dependency('business_time')
+  s.add_development_dependency('pry')
 
   s.files        = `git ls-files`.split($/)
   s.executables  = s.files.grep(%r{^bin/}).map{ |f| File.basename(f) }

@@ -138,6 +138,19 @@ class USPSTest < Minitest::Test
     assert_equal :out_for_delivery, response.status
     assert_nil response.scheduled_delivery_date
     assert_nil response.shipment_events.last.location.city
+
+    assert_equal 'NP', response.shipment_events.first.type_code
+    assert_equal Time.parse('Jan 01, 2000'), response.shipment_events.first.time
+
+    special_country  = xml_fixture('usps/tracking_response_alt').gsub('CANADA','TAIWAN')
+    @carrier.expects(:commit).returns(special_country)
+    response = @carrier.find_tracking_info('9102901000462189604217', :test => true)
+    assert_equal 'Taiwan, Province of China', response.shipment_events.last.location.country.name
+
+    special_country  = xml_fixture('usps/tracking_response_alt').gsub('CANADA','KOREA  REPUBLIC OF')
+    @carrier.expects(:commit).returns(special_country)
+    response = @carrier.find_tracking_info('9102901000462189604217', :test => true)
+    assert_equal 'Korea, Republic of', response.shipment_events.last.location.country.name
   end
 
   def test_find_tracking_info_destination
@@ -173,7 +186,7 @@ class USPSTest < Minitest::Test
   def test_batch_find_tracking_info_should_return_a_tracking_response_array
     @carrier.expects(:commit).returns(@batch_tracking_response)
     responses = @carrier.batch_find_tracking_info(@tracking_infos_array, :test => true)
-    assert_equal 3, responses.length
+    assert_equal 4, responses.length
     assert responses.all? { |x| x.instance_of? ActiveShipping::TrackingResponse}
   end
 
@@ -563,6 +576,10 @@ class USPSTest < Minitest::Test
     )
 
     assert_equal [3767, 5526, 7231, 7231], response.rates.map(&:price)
+  end
+
+  def test_maximum_address_field_length
+    assert_equal 38, @carrier.maximum_address_field_length
   end
 
   private

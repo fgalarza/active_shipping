@@ -1,5 +1,48 @@
 # ActiveShipping CHANGELOG
 
+### v1.6.0
+- Update active_utils dependency to v3.2.0
+
+### v1.5.0
+- Fix Kunaki remote test
+- Fix credentials for Canada Post PWS remote tests
+- Add compare price to rate estimate options
+- Add phone required to rate estimate options
+- Update active_utils dependency to v3.1.0
+
+### v1.4.3
+
+- Fix UPS SurePost for < 1 pound packages
+- Use status type code in UPS tracking
+- Fix USPS and Fedex remote tests
+
+### v1.4.2
+
+- Fix USPS rates for commercial shipments
+
+### v1.4.1
+
+- Raise error on invalid status code with FedEx
+- Fix USPS tracking to certain countries
+- Fix USPS tracking of events with no time
+- Fix USPS batch tracking error messages.
+- Fix FedEx logging exception
+
+### v1.4.0
+
+- Added support for USPS merchant returns service
+- Added support for UPS SurePost
+- Added support for UPS third party billing
+- Fix FedEx tracking response errors
+- Add rake console command for development
+
+### v1.3.0
+
+- Support voiding labels on UPS
+- Parse FedEx ground delivery dates
+- Add maximum address length field
+- Fix UPS unknown country code when using SUREPOST
+
 ### v1.2.2
 
 - Fix "RECTANGULAR" errors with small USPS US->US package rate requests

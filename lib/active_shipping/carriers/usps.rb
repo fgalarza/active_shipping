@@ -22,10 +22,8 @@ module ActiveShipping
 
     TEST_DOMAINS = { # indexed by security; e.g. TEST_DOMAINS[USE_SSL[:rates]]
       true => 'secure.shippingapis.com',
-      false => 'testing.shippingapis.com'
+      false => 'stg-production.shippingapis.com'
     }
-
-    TEST_RESOURCE = 'ShippingAPITest.dll'
 
     API_CODES = {
       :us_rates => 'RateV4',
@@ -154,6 +152,13 @@ module ActiveShipping
       "WS" => "Western Samoa"
     }
 
+    TRACKING_ODD_COUNTRY_NAMES = {
+      'TAIWAN' => 'TW',
+      'MACEDONIA THE FORMER YUGOSLAV REPUBLIC OF'=> 'MK',
+      'MICRONESIA FEDERATED STATES OF' => 'FM',
+      'MOLDOVA REPUBLIC OF' => 'MD',
+    }
+
     RESPONSE_ERROR_MESSAGES = [
       /There is no record of that mail item/,
       /This Information has not been included in this Test Server\./,
@@ -238,7 +243,14 @@ module ActiveShipping
         description = prefix
       end
 
-      timestamp = "#{node.at('EventDate').text}, #{node.at('EventTime').text}"
+      time = if node.at('EventDate').text.present?
+        timestamp = "#{node.at('EventDate').text}, #{node.at('EventTime').text}"
+        Time.parse(timestamp)
+      else
+        # Arbitrary time in past, because we need to sort properly by time
+        Time.parse("Jan 01, 2000")
+      end
+
       event_code = node.at('EventCode').text
       city = node.at('EventCity').try(:text)
       state = node.at('EventState').try(:text)
@@ -250,10 +262,14 @@ module ActiveShipping
       # USPS returns upcased country names which ActiveUtils doesn't recognize without translation
       country = find_country_code_case_insensitive(country)
 
-      time = Time.parse(timestamp)
       zoneless_time = Time.utc(time.year, time.month, time.mday, time.hour, time.min, time.sec)
       location = Location.new(city: city, state: state, postal_code: zip_code, country: country)
       EventDetails.new(description, time, zoneless_time, location, event_code)
+    end
+
+    def maximum_address_field_length
+      # https://www.usps.com/business/web-tools-apis/address-information-api.pdf
+      38
     end
 
     protected
@@ -405,10 +421,10 @@ module ActiveShipping
               xml.Length("%0.2f" % [package.inches(:length), 0.01].max)
               xml.Height("%0.2f" % [package.inches(:height), 0.01].max)
               xml.Girth("%0.2f" % [package.inches(:girth), 0.01].max)
+              xml.OriginZip(origin.zip)
               if commercial_type = commercial_type(options)
                 xml.public_send(COMMERCIAL_FLAG_NAME.fetch(commercial_type), 'Y')
               end
-              xml.OriginZip(origin.zip)
               if destination.zip.present?
                 xml.AcceptanceDateTime((options[:acceptance_time] || Time.now.utc).iso8601)
                 xml.DestinationPostalCode(destination.zip)
@@ -634,7 +650,7 @@ module ActiveShipping
     end
 
     def error_description_node(node)
-      node.xpath('//Error/Description')
+      node.xpath('Error/Description')
     end
 
     def response_status_node(node)
@@ -650,7 +666,10 @@ module ActiveShipping
     end
 
     def find_country_code_case_insensitive(name)
-      upcase_name = name.upcase
+      upcase_name = name.upcase.gsub('  ', ', ')
+      if special = TRACKING_ODD_COUNTRY_NAMES[upcase_name]
+        return special
+      end
       country = ActiveUtils::Country::COUNTRIES.detect { |c| c[:name].upcase == upcase_name }
       raise ActiveShipping::Error, "No country found for #{name}" unless country
       country[:alpha2]
@@ -663,8 +682,7 @@ module ActiveShipping
     def request_url(action, request, test)
       scheme = USE_SSL[action] ? 'https://' : 'http://'
       host = test ? TEST_DOMAINS[USE_SSL[action]] : LIVE_DOMAIN
-      resource = test ? TEST_RESOURCE : LIVE_RESOURCE
-      "#{scheme}#{host}/#{resource}?API=#{API_CODES[action]}&XML=#{URI.encode(request)}"
+      "#{scheme}#{host}/#{LIVE_RESOURCE}?API=#{API_CODES[action]}&XML=#{URI.encode(request)}"
     end
 
     def strip_zip(zip)
