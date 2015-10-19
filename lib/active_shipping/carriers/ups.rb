@@ -17,7 +17,7 @@ module ActiveShipping
       :ship_confirm => 'ups.app/xml/ShipConfirm',
       :ship_accept => 'ups.app/xml/ShipAccept',
       :delivery_dates =>  'ups.app/xml/TimeInTransit',
-      :void =>  'ups.app/xml/Void'
+      :void =>  'ups.app/xml/Void',
       :address_validation => 'ups.app/xml/XAV'
     }
 
