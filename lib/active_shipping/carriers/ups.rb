@@ -906,14 +906,18 @@ module ActiveShipping
 
       if success
         candidates = xml.css('AddressKeyFormat').map do |candidate|
+          address_lines = candidate.css('AddressLine')
           Location.new(
-            country: candidate.at('CountryCode').try(:text),
-            zip: candidate.at('PostcodePrimaryLow').try(:text),
-            state: candidate.at('PoliticalDivision1').try(:text),
-            city: candidate.at('PoliticalDivision2').try(:text),
+            country:     candidate.at('CountryCode').try(:text),
+            postal_code: candidate.at('PostcodePrimaryLow').try(:text),
+            state:       candidate.at('PoliticalDivision1').try(:text),
+            city:        candidate.at('PoliticalDivision2').try(:text),
+            address1:    address_lines[0].try(:text),
+            address2:    address_lines[1].try(:text),
+            address3:    address_lines[2].try(:text)
           )
         end
-      #  byebug
+
         valid = xml.at('ValidAddressIndicator').present?
       end
       ActiveShipping::AddressValidationResponse.new(success, message, Hash.from_xml(response).values.first, valid: valid, candidates: candidates, xml: response, last_request: last_request)
